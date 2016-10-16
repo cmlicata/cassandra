@@ -541,6 +541,30 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                                      "Use cassandra.replace_address if you want to replace this node.",
                                                      FBUtilities.getBroadcastAddress()));
         }
+        // [CASSANDRA-12485]: Always require replace address to replace existing token.
+        if (!Boolean.getBoolean("cassandra.replace_address") && !Boolean.getBoolean("cassandra.allow_unsafe_replace"))
+        {
+            logger.debug("Starting token collision check as cassandra.replace_address=false");
+
+            List<String> bootstrappingNodeTokens = getTokens(FBUtilities.getBroadcastAddress());
+
+            // Check if there are live or unreachable token owners with the same tokens as the new node and prevent
+            // bootstrap in this case.
+            Set<InetAddress> tokenOwners = Sets.union(Gossiper.instance.getLiveTokenOwners(),
+                                                      Gossiper.instance.getUnreachableTokenOwners());
+
+            for (InetAddress node : tokenOwners)
+            {
+                if (Collections.disjoint(bootstrappingNodeTokens, getTokens(node)))
+                {
+                    throw new RuntimeException(String.format("A token collision was detected with a node with " +
+                                                             "address %s, cancelling join. Use cassandra.replace_address " +
+                                                             "or cassandra.allow_unsafe_replace, if you want to" +
+                                                             " bootstrap this node.", node));
+                }
+            }
+        }
+
 
         if (shouldBootstrap() && useStrictConsistency && !allowSimultaneousMoves())
         {
